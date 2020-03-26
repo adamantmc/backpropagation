@@ -52,12 +52,13 @@ class NeuralNetwork(object):
         no_features = len(train_x[0])
 
         x = np.asarray(train_x).T
-        y = np.asarray(train_y).reshape(-1, 1)
+        y = np.asarray(train_y).reshape(1, -1)
 
         self._initialize_weights(no_features)
+
         self._forward_propagation(x)
         self._backpropagation(y)
-
+        
     def _forward_propagation(self, x):
         layers = len(self.layer_units)
 
@@ -87,23 +88,18 @@ class NeuralNetwork(object):
         layers = len(self.layer_units)
         batch_size = y.shape[1]
 
-        print("z_shapes", [f.shape for f in self._z_values_cache])
-
         for i in reversed(range(layers)):
-            print(i)
             # dZ[l] = dL/dA[l] * dA[l]/dZ[l] = dA[l] * g[l]'(z[l])
 
             # Calculate dA
             if i == layers - 1:
-                print(y.shape)
                 da = self._loss_derivative(self._a_values_cache[i], y)
-                print("da", da.shape)
             else:
                 # dA[l-1] = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/dA[l-1] = dL/dZ[l] * W[l] = W[l].T * dZ[l]
                 da = np.matmul(self._weights[i+1].T, dz) # dz will be defined from previous iteration
 
             dz = da * self._activation_function_derivative(self._z_values_cache[i])
-            print("dz", dz.shape)
+
             # Calculate dw and db
             # dw = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/dW[l] = 1/m * dZ[l] * A[l-1].T
             dw = (1/batch_size) * np.matmul(dz, self._a_values_cache[i-1].T)
