@@ -1,103 +1,26 @@
 import numpy as np
-import os
-import shutil
-from tabulate import tabulate
-
-def relu(x):
-    return np.maximum(x, 0)
-
-def relu_derivative(x):
-    _x = np.copy(x)
-
-    _x[_x <= 0] = 0
-    _x[_x > 0] = 1
-
-    return _x
-
-def sigmoid(x):
-    r = 1 / (1 + np.exp(-x))
-    return r
-
-def sigmoid_derivative(x):
-    r = sigmoid(x) * (1 - sigmoid(x))
-    return r
-
-def tanh(x):
-    return np.tanh(x)
-
-def tanh_derivative(x):
-    return 1 - tanh(x) ** 2
-
-def entropy_loss(y_pred, y_true):
-    y_pred = np.clip(y_pred, 1e-7, 1.0 - 1e-7)
-    return -(np.sum(
-        np.sum(
-            (
-                y_true * np.log(y_pred) +
-                (1-y_true) * np.log(1-y_pred)
-            ),
-            axis=0,
-            keepdims=True
-        )
-    ) / y_pred.shape[1])
-
-def entropy_loss_derivative(y_pred, y_true):
-    return -(np.divide(y_true, y_pred) - np.divide(1-y_true, 1-y_pred))
-
-def dump_values(x, a, z, w, dw, db, epoch):
-    dir = "./epoch_{}_values".format(epoch)
-
-    if os.path.exists(dir) and os.path.isdir(dir):
-        shutil.rmtree(dir)
-
-    os.makedirs(dir)
-    data = {"a": a, "z": z, "w": w, "dw": dw, "db": db}
-
-    for d in data:
-        vals = data[d]
-
-        for index, arr in enumerate(vals):
-            with open(os.path.join(dir, "{}{}".format(d, index+1)), "w") as f:
-                table = tabulate(arr)
-                f.write(table + "\n")
-
-    with open(os.path.join(dir,"x"), "w") as f:
-        table = tabulate(x)
-        f.write(table + "\n")
-
-
-class BatchProvider:
-    def __init__(self, data, batch_size):
-        self.data = data
-        self.no_examples = len(data)
-        self.batch_size = batch_size
-        self.index = 0
-
-    def __iter__(self):
-        self.index = 0
-        return self
-
-    def __next__(self):
-        if self.index >= self.no_examples:
-            raise StopIteration
-
-        start = self.index
-        end = self.index + self.batch_size
-        if end > self.no_examples:
-            end = self.no_examples
-
-        self.index += self.batch_size
-
-        return self.data[start:end]
+from .batch_provider import BatchProvider
+from .activation_functions import ACTIVATION_FUNCTIONS
+from .loss_functions import *
 
 
 class NeuralNetwork(object):
-    def __init__(self, layer_units, lr=0.0001, epochs=1, batch_size=-1):
+    def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1, batch_size=-1):
         self.layer_units = layer_units
         layers = len(layer_units)
 
-        self._activation_functions = [tanh if i != layers - 1 else sigmoid for i in range(layers)]
-        self._activation_function_derivatives = [tanh_derivative if i != layers - 1 else sigmoid_derivative for i in range(layers)]
+        default_activation = "relu"
+        self._activation_functions = []
+
+        for i in range(layers):
+            self._activation_functions.append(default_activation)
+        if activation_dict is not None:
+            for i in activation_dict:
+                f = activation_dict[i]
+                self._check_activation_function(i, f)
+                self._activation_functions[i] = f
+
+        print("Activation Functions: {}".format(self._activation_functions))
 
         self.lr = lr
         self.batch_size = batch_size
@@ -109,12 +32,19 @@ class NeuralNetwork(object):
         self._a_values_cache = []
         self._z_values_cache = []
 
+    def _check_activation_function(self, layer, function):
+        assert function in ACTIVATION_FUNCTIONS, \
+            "Unknown activation function for layer {layer} ({function}) - " \
+            "the activation functions currently supported are {valid_functions}".format(
+                layer=layer, function=function, valid_functions=ACTIVATION_FUNCTIONS.keys()
+            )
+
     def _initialize_weights(self, no_features):
         np.random.seed(2)
         # Initialize weights
         prev_units = no_features
         for units in self.layer_units:
-            w = np.zeros((units, prev_units))
+            w = np.random.randn(units, prev_units) * 0.01
             b = np.zeros((units, 1))
 
             self._weights.append(w)
@@ -130,6 +60,9 @@ class NeuralNetwork(object):
         x = np.asarray(train_x)
         y = np.asarray(train_y)
 
+        if len(y.shape) == 1:
+            y = y.reshape(-1, 1)
+
         if self.batch_size == -1:
             self.batch_size = no_examples
 
@@ -139,7 +72,6 @@ class NeuralNetwork(object):
         self._initialize_weights(no_features)
 
         for i in range(self.epochs):
-            print("Epoch " + str(i))
             for x_batch, y_batch in zip(x_batches, y_batches):
                 x_batch = x_batch.T
                 y_batch = y_batch.T
@@ -149,7 +81,7 @@ class NeuralNetwork(object):
                 self._a_values_cache = a_cache
                 dw, db = self._backpropagation(x_batch, y_batch)
 
-                # self._gradient_check(x_batch, y_batch, self._weights, self._biases, dw, db)
+                self._gradient_check(x_batch, y_batch, self._weights, self._biases, dw, db)
                 # dump_values(x_batch, self._a_values_cache, self._z_values_cache, self._weights, dw, db, i)
 
                 self._update_weights(dw, db)
@@ -157,7 +89,7 @@ class NeuralNetwork(object):
             self._forward_propagation(x.T, self._weights, self._biases)
             preds = self._a_values_cache[-1]
             loss = self._loss(preds, y.T)
-            print(loss)
+            print("Epoch {} Loss: {}".format(i, loss))
 
         print(self._a_values_cache[-1])
 
@@ -175,7 +107,7 @@ class NeuralNetwork(object):
             z = np.matmul(w, prev_activations) + b
             assert z.shape == (units, self.batch_size)
 
-            a = self._activation_functions[i](z)
+            a = self._activation_function(z, i)
             assert a.shape == z.shape
 
             prev_activations = a
@@ -205,7 +137,7 @@ class NeuralNetwork(object):
             assert da.shape[0] == self.layer_units[i]
             assert da.shape[1] == self.batch_size
 
-            dz = da * self._activation_function_derivatives[i](self._z_values_cache[i])
+            dz = da * self._activation_function_derivative(self._z_values_cache[i], i)
             assert dz.shape[0] == self.layer_units[i]
             assert dz.shape[1] == self.batch_size
 
@@ -245,8 +177,8 @@ class NeuralNetwork(object):
                     left_loss = self._loss(left_a[-1], y)
 
                     approx_dw = (right_loss - left_loss) / (2 * epsilon)
-                    assert approx_dw - dw[l][i][j] < 1e-7
-
+                    assert abs(approx_dw - dw[l][i][j]) < 1e-7, \
+                        "{} - {} = {}".format(approx_dw, dw[l][i][j], abs(approx_dw - dw[l][i][j]))
 
     def _update_weights(self, dw, db):
         layers = len(self.layer_units)
@@ -255,11 +187,13 @@ class NeuralNetwork(object):
             self._weights[i] = self._weights[i] - self.lr * dw[i]
             self._biases[i] = self._biases[i] - self.lr * db[i]
 
-    def _activation_function(self, z):
-        return relu(z)
+    def _activation_function(self, z, layer):
+        func_name = self._activation_functions[layer]
+        return ACTIVATION_FUNCTIONS[func_name][0](z)
 
-    def _activation_function_derivative(self, z):
-        return relu_derivative(z)
+    def _activation_function_derivative(self, z, layer):
+        func_name = self._activation_functions[layer]
+        return ACTIVATION_FUNCTIONS[func_name][1](z)
 
     def _loss(self, a, y):
         return entropy_loss(a, y)

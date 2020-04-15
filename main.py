@@ -1,4 +1,4 @@
-from nn import NeuralNetwork
+from nn.nn import NeuralNetwork
 from sklearn.datasets import load_breast_cancer
 from sklearn.preprocessing import normalize
 import numpy as np
@@ -66,7 +66,7 @@ def load_dataset(image_folder="images/", split_ratio=0.7):
 
     return train_x, train_y, test_x, test_y
 
-x, y, test_x, test_y = load_dataset("images/")
+# x, y, test_x, test_y = load_dataset("images/")
 # x, y = load_breast_cancer(return_X_y=True)
 # x = np.asarray(x)
 #
@@ -108,8 +108,8 @@ def load_planar_dataset():
 
     return X, Y
 
-# np.random.seed(1)
-# x, y = load_planar_dataset()
-net = NeuralNetwork([2], epochs=10000)
+np.random.seed(1)
+x, y = load_planar_dataset()
+net = NeuralNetwork([4, 1], epochs=10000, activation_dict={-1: "sigmoid", 0: "tanh"}, lr=1.2)
 print(x.shape, y.shape)
 net.fit(x, y)
