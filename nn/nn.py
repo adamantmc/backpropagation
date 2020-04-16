@@ -5,7 +5,18 @@ from .loss_functions import *
 
 
 class NeuralNetwork(object):
-    def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1, batch_size=-1):
+    def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1, batch_size=64, val_x=None, val_y=None):
+        """
+        Initializes a Neural Network model
+        :param layer_units: List containing number of neurons per layer
+        :param lr: Learning rate
+        :param activation_dict: Dictionary that maps layer indexes to activation functions.
+                Default activation function is ReLU.
+        :param epochs: Number of passes over training set
+        :param batch_size: Number of examples per iteration - single forward pass and back-propagation
+        :param val_x: validation set examples
+        :param val_y: validation set labels
+        """
         self.layer_units = layer_units
         layers = len(layer_units)
 
@@ -26,11 +37,18 @@ class NeuralNetwork(object):
         self.batch_size = batch_size
         self.epochs = epochs
 
+        self._validation_set = (val_x, val_y) \
+            if val_x is not None and val_y is not None \
+            else None
+
         self._weights = []
         self._biases = []
 
         self._a_values_cache = []
         self._z_values_cache = []
+
+        self.training_losses = []
+        self.validation_losses = []
 
     def _check_activation_function(self, layer, function):
         assert function in ACTIVATION_FUNCTIONS, \
@@ -53,6 +71,9 @@ class NeuralNetwork(object):
             prev_units = units
 
     def fit(self, train_x, train_y):
+        self.training_losses = []
+        self.validation_losses = []
+
         # Get number of features of each training example
         no_features = len(train_x[0])
         no_examples = len(train_x)
@@ -72,6 +93,9 @@ class NeuralNetwork(object):
         self._initialize_weights(no_features)
 
         for i in range(self.epochs):
+            training_loss = 0
+            steps = 0
+
             for x_batch, y_batch in zip(x_batches, y_batches):
                 x_batch = x_batch.T
                 y_batch = y_batch.T
@@ -80,18 +104,57 @@ class NeuralNetwork(object):
                 self._z_values_cache = z_cache
                 self._a_values_cache = a_cache
                 dw, db = self._backpropagation(x_batch, y_batch)
+                loss = self._loss(self._a_values_cache[-1], y_batch)
+                training_loss += loss
+                steps += 1
 
-                self._gradient_check(x_batch, y_batch, self._weights, self._biases, dw, db)
+                # self._gradient_check(x_batch, y_batch, self._weights, self._biases, dw, db)
                 # dump_values(x_batch, self._a_values_cache, self._z_values_cache, self._weights, dw, db, i)
 
                 self._update_weights(dw, db)
 
-            self._forward_propagation(x.T, self._weights, self._biases)
-            preds = self._a_values_cache[-1]
-            loss = self._loss(preds, y.T)
-            print("Epoch {} Loss: {}".format(i, loss))
+            self.training_losses.append(training_loss / steps)
+            val_str = ""
+            if self._validation_set is not None:
+                val_loss = self.evaluate(self._validation_set[0], self._validation_set[1])
+                self.validation_losses.append(val_loss)
+                val_str = "Validation Loss: {}".format(val_loss)
 
-        print(self._a_values_cache[-1])
+            print("Epoch {} Training Loss: {} {}".format(i+1, self.training_losses[-1], val_str))
+
+    def evaluate(self, x, y):
+        """
+        Evaluates model performance on given set
+        :param x: np.array with shape (#EXAMPLES, #FEATURES)
+        :param y: np.array with shape (#EXAMPLES, #OUTPUT_DIMENSIONS)
+        :return: model loss on given data
+        """
+        z_values, a_values = self._forward_propagation(x.T, self._weights, self._biases)
+        preds = a_values[-1]
+        loss = self._loss(preds, y.T)
+        return loss
+
+    def predict(self, x, prob_threshold=None):
+        z_values, a_values = self._forward_propagation(x.T, self._weights, self._biases)
+        preds = a_values[-1]
+
+        if prob_threshold is not None:
+            preds[preds > prob_threshold] = 1
+            preds[preds <= prob_threshold] = 0
+
+        return preds.T
+
+    def plot_loss(self, savepath="./losses.png"):
+        import matplotlib.pyplot as plt
+
+        fig = plt.figure()
+        plt.plot(self.validation_losses, label="Validation set loss")
+        plt.plot(self.training_losses, label="Training set loss")
+
+        plt.legend()
+        plt.xlabel("Epochs")
+
+        plt.savefig(savepath)
 
     def _forward_propagation(self, x, weights, biases):
         z_cache = []
@@ -105,7 +168,7 @@ class NeuralNetwork(object):
             assert b.shape[0] == units
 
             z = np.matmul(w, prev_activations) + b
-            assert z.shape == (units, self.batch_size)
+            assert z.shape[0] == units
 
             a = self._activation_function(z, i)
             assert a.shape == z.shape
@@ -135,11 +198,10 @@ class NeuralNetwork(object):
                 da = np.matmul(self._weights[i+1].T, dz) # dz will be defined from previous iteration
 
             assert da.shape[0] == self.layer_units[i]
-            assert da.shape[1] == self.batch_size
+            # assert da.shape[1] == self.batch_size
 
             dz = da * self._activation_function_derivative(self._z_values_cache[i], i)
             assert dz.shape[0] == self.layer_units[i]
-            assert dz.shape[1] == self.batch_size
 
             # Calculate dw and db
             # dw = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/dW[l] = 1/m * dZ[l] * A[l-1].T
