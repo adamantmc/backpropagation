@@ -2,7 +2,7 @@ import numpy as np
 from .batch_provider import BatchProvider
 from .activation_functions import ACTIVATION_FUNCTIONS
 from .loss_functions import *
-
+from scipy.sparse.csr import csr_matrix
 
 class NeuralNetwork(object):
     def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1, batch_size=64, val_x=None, val_y=None):
@@ -31,8 +31,6 @@ class NeuralNetwork(object):
                 self._check_activation_function(i, f)
                 self._activation_functions[i] = f
 
-        print("Activation Functions: {}".format(self._activation_functions))
-
         self.lr = lr
         self.batch_size = batch_size
         self.epochs = epochs
@@ -58,11 +56,12 @@ class NeuralNetwork(object):
             )
 
     def _initialize_weights(self, no_features):
-        np.random.seed(2)
         # Initialize weights
         prev_units = no_features
         for units in self.layer_units:
-            w = np.random.randn(units, prev_units) * 0.01
+            # He et al
+            print(units, prev_units)
+            w = np.random.normal(scale=np.sqrt(2/prev_units), size=(units, prev_units))
             b = np.zeros((units, 1))
 
             self._weights.append(w)
@@ -74,12 +73,17 @@ class NeuralNetwork(object):
         self.training_losses = []
         self.validation_losses = []
 
-        # Get number of features of each training example
-        no_features = len(train_x[0])
-        no_examples = len(train_x)
+        x = train_x
+        y = train_y
 
-        x = np.asarray(train_x)
-        y = np.asarray(train_y)
+        if type(train_x) == list:
+            x = np.asarray(x)
+        if type(train_y) == list:
+            y = np.asarray(y)
+
+        # Get number of features of each training example
+        no_features = x.shape[1]
+        no_examples = x.shape[0]
 
         if len(y.shape) == 1:
             y = y.reshape(-1, 1)
@@ -97,6 +101,9 @@ class NeuralNetwork(object):
             steps = 0
 
             for x_batch, y_batch in zip(x_batches, y_batches):
+                if type(x_batch) == csr_matrix:
+                    x_batch = np.asarray(x_batch.todense())
+
                 x_batch = x_batch.T
                 y_batch = y_batch.T
                 z_cache, a_cache = self._forward_propagation(x_batch, self._weights, self._biases)
@@ -134,7 +141,7 @@ class NeuralNetwork(object):
         loss = self._loss(preds, y.T)
         return loss
 
-    def predict(self, x, prob_threshold=None):
+    def predict(self, x, prob_threshold=0.5):
         z_values, a_values = self._forward_propagation(x.T, self._weights, self._biases)
         preds = a_values[-1]
 
@@ -143,18 +150,6 @@ class NeuralNetwork(object):
             preds[preds <= prob_threshold] = 0
 
         return preds.T
-
-    def plot_loss(self, savepath="./losses.png"):
-        import matplotlib.pyplot as plt
-
-        fig = plt.figure()
-        plt.plot(self.validation_losses, label="Validation set loss")
-        plt.plot(self.training_losses, label="Training set loss")
-
-        plt.legend()
-        plt.xlabel("Epochs")
-
-        plt.savefig(savepath)
 
     def _forward_propagation(self, x, weights, biases):
         z_cache = []

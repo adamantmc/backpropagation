@@ -1,7 +1,7 @@
 class BatchProvider:
     def __init__(self, data, batch_size):
         self.data = data
-        self.no_examples = len(data)
+        self.no_examples = data.shape[0]
         self.batch_size = batch_size
         self.index = 0
 

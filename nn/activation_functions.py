@@ -2,16 +2,11 @@ import numpy as np
 
 
 def relu(x):
-    return np.maximum(x, 0)
+    return x * np.asarray(x > 0, dtype=np.int)
 
 
 def relu_derivative(x):
-    _x = np.copy(x)
-
-    _x[_x <= 0] = 0
-    _x[_x > 0] = 1
-
-    return _x
+    return np.asarray(x > 0, dtype=np.int)
 
 
 def sigmoid(x):
