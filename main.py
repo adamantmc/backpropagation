@@ -91,7 +91,7 @@ train_y = train_y[val_index:]
 net = NeuralNetwork([128, 64, train_y.shape[1]], epochs=55, activation_dict={-1: "sigmoid"},
                     lr=0.05, batch_size=512, val_x=np.asarray(val_x.todense()), val_y=val_y)
 net.fit(train_x, train_y)
-plot_losses(net.training_losses, net.validation_losses)
+plot_losses(net.training_losses, net.validation_losses, savepath="model_losses.png")
 
-preds = net.predict(np.asarray(test_x.todense()))
+preds = net.predict(test_x, batch_size=256)
 print(accuracy(preds, test_y))

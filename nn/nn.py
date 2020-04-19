@@ -5,7 +5,8 @@ from .loss_functions import *
 from scipy.sparse.csr import csr_matrix
 
 class NeuralNetwork(object):
-    def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1, batch_size=64, val_x=None, val_y=None):
+    def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1,
+                 batch_size=64, l2_lambda=None, val_x=None, val_y=None):
         """
         Initializes a Neural Network model
         :param layer_units: List containing number of neurons per layer
@@ -14,6 +15,7 @@ class NeuralNetwork(object):
                 Default activation function is ReLU.
         :param epochs: Number of passes over training set
         :param batch_size: Number of examples per iteration - single forward pass and back-propagation
+        :param l2_lambda: L2 Regularization parameter - if None, no regularization is applied
         :param val_x: validation set examples
         :param val_y: validation set labels
         """
@@ -34,7 +36,7 @@ class NeuralNetwork(object):
         self.lr = lr
         self.batch_size = batch_size
         self.epochs = epochs
-
+        self._regularization_param = l2_lambda
         self._validation_set = (val_x, val_y) \
             if val_x is not None and val_y is not None \
             else None
@@ -97,6 +99,8 @@ class NeuralNetwork(object):
         self._initialize_weights(no_features)
 
         for i in range(self.epochs):
+            if i == 55:
+                self.lr = 0.01
             training_loss = 0
             steps = 0
 
@@ -115,7 +119,7 @@ class NeuralNetwork(object):
                 training_loss += loss
                 steps += 1
 
-                # self._gradient_check(x_batch, y_batch, self._weights, self._biases, dw, db)
+                # self._gradient_check(x_batch, y_batch, dw, db)
                 # dump_values(x_batch, self._a_values_cache, self._z_values_cache, self._weights, dw, db, i)
 
                 self._update_weights(dw, db)
@@ -141,15 +145,24 @@ class NeuralNetwork(object):
         loss = self._loss(preds, y.T)
         return loss
 
-    def predict(self, x, prob_threshold=0.5):
-        z_values, a_values = self._forward_propagation(x.T, self._weights, self._biases)
-        preds = a_values[-1]
+    def predict(self, x, prob_threshold=0.5, batch_size=-1):
+        batch_provider = BatchProvider(x, batch_size)
+        preds_per_batch = []
 
-        if prob_threshold is not None:
-            preds[preds > prob_threshold] = 1
-            preds[preds <= prob_threshold] = 0
+        for x_batch in batch_provider:
+            if type(x_batch) == csr_matrix:
+                x_batch = np.asarray(x_batch.todense())
 
-        return preds.T
+            z_values, a_values = self._forward_propagation(x_batch.T, self._weights, self._biases)
+            preds = a_values[-1]
+
+            if prob_threshold is not None:
+                preds[preds > prob_threshold] = 1
+                preds[preds <= prob_threshold] = 0
+
+            preds_per_batch.append(preds.T)
+
+        return np.vstack(preds_per_batch)
 
     def _forward_propagation(self, x, weights, biases):
         z_cache = []
@@ -202,6 +215,10 @@ class NeuralNetwork(object):
             # dw = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/dW[l] = 1/m * dZ[l] * A[l-1].T
             prev_activations = self._a_values_cache[i-1] if i != 0 else x
             dw = (1/batch_size) * np.matmul(dz, prev_activations.T)
+
+            if self._regularization_param is not None:
+                dw += (self._regularization_param / batch_size) * self._weights[i]
+
             assert dw.shape == self._weights[i].shape
 
             # db = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/db[l] = 1/m * sum(dZ[l])
@@ -213,29 +230,39 @@ class NeuralNetwork(object):
 
         return list(reversed(dw_array)), list(reversed(db_array))
 
-    def _gradient_check(self, x, y, weights, biases, dw, db):
+    def _gradient_check(self, x, y, dw, db):
         layers = len(self.layer_units)
         epsilon = 1e-6
 
         for l in range(layers):
-            wl = weights[l]
-            for i in range(wl.shape[0]):
-                for j in range(wl.shape[1]):
-                    w = weights[l][i][j]
+            w_shape = self._weights[l].shape
+            for i in range(w_shape[0]):
+                for j in range(w_shape[1]):
+                    w = self._weights[l][i][j]
 
-                    weights[l][i][j] = w + epsilon
-                    right_z, right_a = self._forward_propagation(x, weights, biases)
-                    weights[l][i][j] = w - epsilon
-                    left_z, left_a = self._forward_propagation(x, weights, biases)
-
-                    weights[l][i][j] = w
-
+                    self._weights[l][i][j] = w + epsilon
+                    right_z, right_a = self._forward_propagation(x, self._weights, self._biases)
                     right_loss = self._loss(right_a[-1], y)
+
+                    self._weights[l][i][j] = w - epsilon
+                    left_z, left_a = self._forward_propagation(x, self._weights, self._biases)
                     left_loss = self._loss(left_a[-1], y)
+
+                    self._weights[l][i][j] = w
 
                     approx_dw = (right_loss - left_loss) / (2 * epsilon)
                     assert abs(approx_dw - dw[l][i][j]) < 1e-7, \
-                        "{} - {} = {}".format(approx_dw, dw[l][i][j], abs(approx_dw - dw[l][i][j]))
+                        "{} - {} = {}, left: {} right: {}, w: {} epsilon: {}".format(
+                            approx_dw, dw[l][i][j], abs(approx_dw - dw[l][i][j]), left_loss, right_loss, w, epsilon)
+
+    def l2_regularization_loss(self, weights, no_examples):
+        cum_sq_norm = 0
+
+        for w in weights:
+            cum_sq_norm += np.power(np.linalg.norm(w), 2)
+
+        l2_loss = self._regularization_param * cum_sq_norm / (2 * no_examples)
+        return l2_loss
 
     def _update_weights(self, dw, db):
         layers = len(self.layer_units)
@@ -253,7 +280,12 @@ class NeuralNetwork(object):
         return ACTIVATION_FUNCTIONS[func_name][1](z)
 
     def _loss(self, a, y):
-        return entropy_loss(a, y)
+        loss = entropy_loss(a, y)
+
+        if self._regularization_param is not None:
+            loss += self.l2_regularization_loss(self._weights, a.shape[1])
+
+        return loss
 
     def _loss_derivative(self, a, y):
         return entropy_loss_derivative(a, y)

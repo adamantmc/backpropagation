@@ -8,7 +8,7 @@ The neural network implementation is in the `nn` module which contains the follo
 - `nn/batch_provider.py`: Generator that splits a given `np.array` in batches
 - `nn/utils.py`: Debugging utilities
 
-Gradient checking is also implemented. The network's weights are initialized using the method described by `He et al`: https://arxiv.org/abs/1502.01852.
+Gradient checking and L2 regularization are also implemented. The network's weights are initialized using the method described by `He et al`: https://arxiv.org/abs/1502.01852. 
 
 ## Example Problem
 The implementation was tested on the IMDB Movie Review classification task. The dataset (http://ai.stanford.edu/~amaas/data/sentiment/) contains 50.000 movie reviews, split into 25.000 for training and 25.000 for testing.
@@ -16,6 +16,8 @@ The implementation was tested on the IMDB Movie Review classification task. The 
 Each review can be either positive (1) or negative (0). After shuffling the training set, 10% of the reviews (1250) are used as the validation set.
 
 The reviews are processed using `scikit-learn`'s TfidfVectorizer in order to obtain vectors for each piece of text. The size vocabulary has an upper limit of 5000 words, after removing stop-words and very frequent words (max_df=0.5 - if more than half the reviews contain the same word, it's probably irrelevant to the review's label since the labels are distributed uniformly). 
+
+The code that handles the text preprocessing and the network creation is in the `main.py` file.
 
 #### Training Parameters
 
