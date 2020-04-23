@@ -1,3 +1,6 @@
+from scipy.sparse.csr import csr_matrix
+import numpy as np
+
 class BatchProvider:
     def __init__(self, data, batch_size):
         self.data = data
@@ -20,4 +23,8 @@ class BatchProvider:
 
         self.index += self.batch_size
 
-        return self.data[start:end]
+        data = self.data[start:end]
+        if type(data) == csr_matrix:
+            data = np.asarray(data.todense())
+
+        return data

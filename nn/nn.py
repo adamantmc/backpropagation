@@ -2,7 +2,6 @@ import numpy as np
 from .batch_provider import BatchProvider
 from .activation_functions import ACTIVATION_FUNCTIONS
 from .loss_functions import *
-from scipy.sparse.csr import csr_matrix
 
 class NeuralNetwork(object):
     def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1,
@@ -44,9 +43,6 @@ class NeuralNetwork(object):
         self._weights = []
         self._biases = []
 
-        self._a_values_cache = []
-        self._z_values_cache = []
-
         self.training_losses = []
         self.validation_losses = []
 
@@ -62,7 +58,6 @@ class NeuralNetwork(object):
         prev_units = no_features
         for units in self.layer_units:
             # He et al
-            print(units, prev_units)
             w = np.random.normal(scale=np.sqrt(2/prev_units), size=(units, prev_units))
             b = np.zeros((units, 1))
 
@@ -105,26 +100,16 @@ class NeuralNetwork(object):
             steps = 0
 
             for x_batch, y_batch in zip(x_batches, y_batches):
-                if type(x_batch) == csr_matrix:
-                    x_batch = np.asarray(x_batch.todense())
-
                 x_batch = x_batch.T
                 y_batch = y_batch.T
-                z_cache, a_cache = self._forward_propagation(x_batch, self._weights, self._biases)
 
-                self._z_values_cache = z_cache
-                self._a_values_cache = a_cache
-                dw, db = self._backpropagation(x_batch, y_batch)
-                loss = self._loss(self._a_values_cache[-1], y_batch)
+                loss = self._train_batch(x_batch, y_batch)
+
                 training_loss += loss
                 steps += 1
 
-                # self._gradient_check(x_batch, y_batch, dw, db)
-                # dump_values(x_batch, self._a_values_cache, self._z_values_cache, self._weights, dw, db, i)
-
-                self._update_weights(dw, db)
-
             self.training_losses.append(training_loss / steps)
+
             val_str = ""
             if self._validation_set is not None:
                 val_loss = self.evaluate(self._validation_set[0], self._validation_set[1])
@@ -132,6 +117,16 @@ class NeuralNetwork(object):
                 val_str = "Validation Loss: {}".format(val_loss)
 
             print("Epoch {} Training Loss: {} {}".format(i+1, self.training_losses[-1], val_str))
+
+    def _train_batch(self, x_batch, y_batch):
+        z_cache, a_cache = self._forward_propagation(x_batch, self._weights, self._biases)
+
+        dw, db = self._backpropagation(x_batch, y_batch, z_cache, a_cache)
+        # self._gradient_check(x_batch, y_batch, dw, db)
+        loss = self._loss(a_cache[-1], y_batch)
+        self._update_weights(dw, db)
+
+        return loss
 
     def evaluate(self, x, y):
         """
@@ -150,9 +145,6 @@ class NeuralNetwork(object):
         preds_per_batch = []
 
         for x_batch in batch_provider:
-            if type(x_batch) == csr_matrix:
-                x_batch = np.asarray(x_batch.todense())
-
             z_values, a_values = self._forward_propagation(x_batch.T, self._weights, self._biases)
             preds = a_values[-1]
 
@@ -171,14 +163,15 @@ class NeuralNetwork(object):
         prev_activations = x
         for i, units in enumerate(self.layer_units):
             w = weights[i]
-            assert w.shape[0] == units
             b = biases[i]
-            assert b.shape[0] == units
 
             z = np.matmul(w, prev_activations) + b
-            assert z.shape[0] == units
-
             a = self._activation_function(z, i)
+
+            # Sanity-check assertions
+            assert w.shape[0] == units
+            assert b.shape[0] == units
+            assert z.shape[0] == units
             assert a.shape == z.shape
 
             prev_activations = a
@@ -188,7 +181,30 @@ class NeuralNetwork(object):
 
         return z_cache, a_cache
 
-    def _backpropagation(self, x, y):
+    def _backpropagation(self, x, y, z_cache, a_cache):
+        """
+        Backpropagation algorithm - calculate partial derivatives of loss function
+        with regard to weights (dw) and biases (db) using the chain rule. The following
+        equations are used.
+
+        dw[l] = dL/da[l] * da[l]/dz[l] * dz[l]/dW[l] = 1/m * dz[l] * A[l-1].T
+        db[l] = dL/da[l] * da[l]/dz[l] * dz[l]/db[l] = 1/m * sum(dz[l])
+
+        where:
+            dz[l] = dL/da[l] * da[l]/dZ[l] = da[l] * g[l]'(z[l])
+            da[l-1] = dL/da[l] * da[l]/dZ[l] * dz[l]/da[l-1] = dL/dz[l] * W[l] = W[l].T * dz[l]
+
+            A: activation matrix (self._a_values_caache)
+            W: weights matrix (self._weights)
+            g[l]: activation function of layer l
+            dx = partial derivative of loss fucntion L w.r.t. x
+
+        first da (last layer) equals the derivative loss with regard to its input (a)
+
+        :param x:
+        :param y:
+        :return:
+        """
         dw_array = []
         db_array = []
 
@@ -196,33 +212,28 @@ class NeuralNetwork(object):
         batch_size = y.shape[1]
 
         for i in reversed(range(layers)):
-            # dZ[l] = dL/dA[l] * dA[l]/dZ[l] = dA[l] * g[l]'(z[l])
-
-            # Calculate dA
+            # Calculate da
             if i == layers - 1:
-                da = self._loss_derivative(self._a_values_cache[i], y)
+                da = self._loss_derivative(a_cache[i], y)
             else:
-                # dA[l-1] = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/dA[l-1] = dL/dZ[l] * W[l] = W[l].T * dZ[l]
                 da = np.matmul(self._weights[i+1].T, dz) # dz will be defined from previous iteration
 
-            assert da.shape[0] == self.layer_units[i]
-            # assert da.shape[1] == self.batch_size
-
-            dz = da * self._activation_function_derivative(self._z_values_cache[i], i)
-            assert dz.shape[0] == self.layer_units[i]
+            dz = da * self._activation_function_derivative(z_cache[i], i)
 
             # Calculate dw and db
-            # dw = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/dW[l] = 1/m * dZ[l] * A[l-1].T
-            prev_activations = self._a_values_cache[i-1] if i != 0 else x
+            prev_activations = a_cache[i-1] if i != 0 else x
             dw = (1/batch_size) * np.matmul(dz, prev_activations.T)
 
             if self._regularization_param is not None:
                 dw += (self._regularization_param / batch_size) * self._weights[i]
 
-            assert dw.shape == self._weights[i].shape
-
-            # db = dL/dA[l] * dA[l]/dZ[l] * dZ[l]/db[l] = 1/m * sum(dZ[l])
             db = (1/batch_size) * np.sum(dz, axis=1, keepdims=True)
+
+            # Sanity-check assertions
+            assert da.shape[0] == self.layer_units[i]
+            assert da.shape[1] == batch_size
+            assert dz.shape[0] == self.layer_units[i]
+            assert dw.shape == self._weights[i].shape
             assert db.shape == self._biases[i].shape
 
             dw_array.append(dw)
