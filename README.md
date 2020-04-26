@@ -3,12 +3,19 @@ Implementation of a neural network trained using backpropagation.
 
 The neural network implementation is in the `nn` module which contains the following files:
 - `nn/nn.py`: NeuralNetwork class in which backpropagation is implemented
+- `nn/optimizers.py`: Different optimization algorithms
 - `nn/activation_functions.py`: Activation functions and their derivatives
 - `nn/loss_functions.py`: Loss functions and their derivatives
 - `nn/batch_provider.py`: Generator that splits a given `np.array` in batches
 - `nn/utils.py`: Debugging utilities
 
-Gradient checking and L2 regularization are also implemented. The network's weights are initialized using the method described by `He et al`: https://arxiv.org/abs/1502.01852. 
+Features:
+- Gradient Checking
+- L2 Regularization
+- He Weight Initialization
+- Momentum
+- RMSProp
+- Adam
 
 ## Example Problem
 The implementation was tested on the IMDB Movie Review classification task. The dataset (http://ai.stanford.edu/~amaas/data/sentiment/) contains 50.000 movie reviews, split into 25.000 for training and 25.000 for testing.
