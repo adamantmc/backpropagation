@@ -1,11 +1,12 @@
-import numpy as np
 from .batch_provider import BatchProvider
 from .activation_functions import ACTIVATION_FUNCTIONS
 from .loss_functions import *
+from .optimizers import GradientDescent
 
 class NeuralNetwork(object):
     def __init__(self, layer_units, lr=0.0001, activation_dict=None, epochs=1,
-                 batch_size=64, l2_lambda=None, val_x=None, val_y=None):
+                 batch_size=64, optimizer=None, momentum_beta=0.9,
+                 l2_lambda=None, val_x=None, val_y=None):
         """
         Initializes a Neural Network model
         :param layer_units: List containing number of neurons per layer
@@ -14,6 +15,7 @@ class NeuralNetwork(object):
                 Default activation function is ReLU.
         :param epochs: Number of passes over training set
         :param batch_size: Number of examples per iteration - single forward pass and back-propagation
+        :param optimizer: Optimizer that will be used - defaults to simple gradient descent
         :param l2_lambda: L2 Regularization parameter - if None, no regularization is applied
         :param val_x: validation set examples
         :param val_y: validation set labels
@@ -32,13 +34,16 @@ class NeuralNetwork(object):
                 self._check_activation_function(i, f)
                 self._activation_functions[i] = f
 
-        self.lr = lr
         self.batch_size = batch_size
         self.epochs = epochs
         self._regularization_param = l2_lambda
         self._validation_set = (val_x, val_y) \
             if val_x is not None and val_y is not None \
             else None
+
+        if optimizer is None:
+            optimizer = GradientDescent(lr)
+        self._optimizer = optimizer
 
         self._weights = []
         self._biases = []
@@ -94,8 +99,6 @@ class NeuralNetwork(object):
         self._initialize_weights(no_features)
 
         for i in range(self.epochs):
-            if i == 55:
-                self.lr = 0.01
             training_loss = 0
             steps = 0
 
@@ -276,11 +279,9 @@ class NeuralNetwork(object):
         return l2_loss
 
     def _update_weights(self, dw, db):
-        layers = len(self.layer_units)
-
-        for i in range(layers):
-            self._weights[i] = self._weights[i] - self.lr * dw[i]
-            self._biases[i] = self._biases[i] - self.lr * db[i]
+        weights, biases = self._optimizer.optimize(dw, db, self._weights, self._biases)
+        self._weights = weights
+        self._biases = biases
 
     def _activation_function(self, z, layer):
         func_name = self._activation_functions[layer]

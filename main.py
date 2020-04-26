@@ -1,5 +1,6 @@
 from nn.nn import NeuralNetwork
 from nn.utils import plot_losses
+from nn.optimizers import RMSProp, GradientDescentMomentum, GradientDescent, Adam
 import os
 import numpy as np
 import pickle
@@ -88,10 +89,21 @@ val_y = train_y[:val_index]
 train_x = train_x[val_index:]
 train_y = train_y[val_index:]
 
-net = NeuralNetwork([128, 64, train_y.shape[1]], epochs=55, activation_dict={-1: "sigmoid"},
-                    lr=0.05, batch_size=512, val_x=np.asarray(val_x.todense()), val_y=val_y)
+epochs = 18
+lr = 0.0001
+# optimizer = GradientDescentMomentum(learning_rate=lr, beta=0.9)
+optimizer = Adam(learning_rate=lr, beta1=0.9, beta2=0.999)
+
+net = NeuralNetwork([128, 64, train_y.shape[1]], epochs=epochs, activation_dict={-1: "sigmoid"},
+                    batch_size=512, val_x=np.asarray(val_x.todense()), val_y=val_y,
+                    optimizer=optimizer)
+
 net.fit(train_x, train_y)
 plot_losses(net.training_losses, net.validation_losses, savepath="model_losses.png")
+
+with open("model_losses_adam_{}_{}_l2.txt".format(epochs, lr), "w") as f:
+    for tl, vl in zip(net.training_losses, net.validation_losses):
+        f.write("{}, {}\n".format(tl, vl))
 
 preds = net.predict(test_x, batch_size=256)
 print(accuracy(preds, test_y))
